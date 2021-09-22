@@ -32,7 +32,7 @@ uint8_t fcSysID = 1;
 WiFiClient client;
 uint8_t missionCount = 0;
 bool receivedCount = false;
-const uint8_t sensorMsgFreqHz = 10; 
+const uint16_t sensorMsgFreqHz = 10; 
 
 /* send mavlink stuff to GS if received from FC */
 void TaskUARTFun(void * pvParameters) {
@@ -68,6 +68,7 @@ void TaskUARTFun(void * pvParameters) {
             udp.write(buf, len);
           }
         }
+        break;
       }
     }
     udp.endPacket();
@@ -109,8 +110,7 @@ void TaskUDPFun(void * pvParameters) {
               SerialMAV.write(buf, len);
             }
           }
-
-          break; /* get OUT of dis loop if u done reading */
+          break;
         }
       }
     }
@@ -142,9 +142,9 @@ void setup() {
       if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status))
       {
         fcSysID = msg.sysid;
-        Serial.print("got fc heartbeat: sysID "); Serial.println(fcSysID);
+        Serial.print("\n got fc heartbeat: sysID "); Serial.println(fcSysID);
         uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-        mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &msg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, 5, 1);
+        mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &msg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, sensorMsgFreqHz, 1);
         uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
         SerialMAV.write(buf, len);
         firstReceived = true; 
