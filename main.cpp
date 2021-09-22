@@ -18,7 +18,7 @@ IPAddress subnet(255, 255, 240, 0);
 WiFiUDP udp;
 const uint16_t remoteport = 14550;
 const uint16_t localport = 14551;
-IPAddress gshost(10, 1, 5, 31); ///TODO: try to dynamically look for host IP
+IPAddress gshost(10, 1, 5, 123); ///TODO: try to dynamically look for host IP ???
 
 /* definition of mavlink serial port (Serial1 on ESP32 feather) */
 HardwareSerial SerialMAV = Serial1;
