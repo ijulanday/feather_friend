@@ -3,7 +3,7 @@
 #include <WiFiUdp.h>
 #include <ardupilotmega/mavlink.h>
 
-/* taskz */
+/* taskz handlez */
 TaskHandle_t TaskUART;
 TaskHandle_t TaskUDP;
 
@@ -20,6 +20,7 @@ const uint16_t remoteport = 14550;
 const uint16_t localport = 14551;
 IPAddress gshost(10, 1, 5, 123); ///TODO: try to dynamically look for host IP ???
 
+
 /* definition of mavlink serial port (Serial1 on ESP32 feather) */
 HardwareSerial SerialMAV = Serial1;
 
@@ -30,6 +31,7 @@ bool firstReceived = false;
 uint8_t fcSysID = 1;
 WiFiClient client;
 uint8_t missionCount = 0;
+bool receivedCount = false;
 
 /**
  * receives mavlink messages to a buffer from serial. updates args passed as pointers
@@ -78,11 +80,12 @@ void TaskUARTFun(void * pvParameters) {
   Serial.print("Started uart activity on core "); Serial.println(xPortGetCoreID());
   mavlink_message_t msg;
   mavlink_status_t status;
-  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
   uint8_t c;
   uint16_t len;
   for(;;)
   {
+    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+    udp.beginPacket(gshost, remoteport);
     while (SerialMAV.available())
     {
       c = SerialMAV.read();
@@ -97,6 +100,7 @@ void TaskUARTFun(void * pvParameters) {
           } break;
           case MAVLINK_MSG_ID_MISSION_REQUEST: /* this is deprecated -- need to transform into MISSION_REQUEST_INT */
           {
+            udp.flush();
             mavlink_mission_request_t req;  /* old, stinky format */
             mavlink_msg_mission_request_decode(&msg, &req);
             // mavlink_msg_mission_request_int_pack(fcSysID, MAV_COMP_ID_ALL, &msg, req.target_system, MAV_COMP_ID_ALL, req.seq, req.mission_type); /* new, epic format for cool ppl */
@@ -106,17 +110,27 @@ void TaskUARTFun(void * pvParameters) {
             Serial.print("- targsys: "); Serial.println(req.target_system);
             Serial.print("- seq: "); Serial.println(req.seq);
             Serial.print("- type: "); Serial.println(req.mission_type);
+
+            /* resume udp and suspend here */
+            // vTaskResume(TaskUDP);
+            // vTaskSuspend(NULL);
           } break;
           case MAVLINK_MSG_ID_MISSION_ACK:
           {
             len = mavlink_msg_to_send_buffer(buf, &msg);
 
             /* start streaming data again */
-            mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &msg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, 5, 1);
-            len = mavlink_msg_to_send_buffer(buf, &msg);
-            SerialMAV.write(buf, len);
+            mavlink_message_t reqDataMsg;
+            uint8_t reqDataBuf[MAVLINK_MAX_PACKET_LEN];
+            mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &reqDataMsg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, 5, 1);
+            uint16_t reqDataLen = mavlink_msg_to_send_buffer(reqDataBuf, &reqDataMsg);
+            SerialMAV.write(reqDataBuf, reqDataLen);
 
             Serial.println("mission ack sent (omg?!) ");
+
+            /* resume UDP task */
+            // vTaskResume(TaskUDP);
+            // receivedCount = false;
           } break;
           default:
           {
@@ -126,6 +140,7 @@ void TaskUARTFun(void * pvParameters) {
         udp.write(buf, len);
       }
     }
+    udp.endPacket();
     vTaskDelay(1);
   }
 }
@@ -146,10 +161,12 @@ void TaskUDPFun(void * pvParameters) {
         uint8_t c = udp.read();
         if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status))
         {
+          udp.flush();
           switch (msg.msgid) 
           {
             case MAVLINK_MSG_ID_MISSION_COUNT:
             {
+              if (receivedCount == true) break;
               uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
               SerialMAV.write(buf, len);
               mavlink_mission_count_t count;
@@ -163,6 +180,11 @@ void TaskUDPFun(void * pvParameters) {
               Serial.println("mission count on udp: ");
               Serial.print("- type: "); Serial.println(count.mission_type);
               Serial.print("- count: "); Serial.println(count.count);
+
+              /* suspend & disallow coming here again */
+              // udp.flush();
+              // vTaskSuspend(NULL);
+              // receivedCount = true;
             } break;
             case MAVLINK_MSG_ID_MISSION_ITEM_INT:
             {
@@ -171,8 +193,26 @@ void TaskUDPFun(void * pvParameters) {
               mavlink_mission_item_int_t item;
               mavlink_msg_mission_item_int_decode(&msg, &item);
 
+              Serial.println("received mission item (int) on udp");
+              Serial.print("- seq no: "); Serial.println(item.seq);
+
+              /* resume UART and suspend */
+              // vTaskResume(TaskUART);
+              // vTaskSuspend(NULL);
+            } break;
+            case MAVLINK_MSG_ID_MISSION_ITEM:
+            {
+              uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+              SerialMAV.write(buf, len);
+              mavlink_mission_item_t item;
+              mavlink_msg_mission_item_decode(&msg, &item);
+
               Serial.println("received mission item on udp");
               Serial.print("- seq no: "); Serial.println(item.seq);
+
+              /* resume UART and suspend */
+              // vTaskResume(TaskUART);
+              // vTaskSuspend(NULL);
             } break;
             default:
             {
@@ -232,9 +272,6 @@ void setup() {
     Serial.print(".");
   }
   Serial.print("\n wifi connected! \n");
-  
-  /* udp connection meme */
-  udp.beginPacket(gshost, remoteport);
 
   //create a task that will be executed in the Task1code() function, with priority 1 and executed on core 0
   xTaskCreatePinnedToCore(
