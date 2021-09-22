@@ -32,48 +32,7 @@ uint8_t fcSysID = 1;
 WiFiClient client;
 uint8_t missionCount = 0;
 bool receivedCount = false;
-
-/**
- * receives mavlink messages to a buffer from serial. updates args passed as pointers
- * 
- * @param   msg     pointer to mavlink message
- * @param   status  pointer to mavlink status
- * @returns         boolean for message receive (1 if successful, 0 if not)
- */
-bool MavlinkReceiveUART(mavlink_message_t* msg, mavlink_status_t* status) {
-  while (SerialMAV.available())
-  {
-    uint8_t c = SerialMAV.read();
-    if (mavlink_parse_char(MAVLINK_COMM_0, c, msg, status))
-    {
-      /* ... */
-      return true;
-    }
-  }
-
-  return false;
-}
-
-/**
- * receives mavlink messages to a buffer from udp. updates args passed as pointers
- * 
- * @param   msg     pointer to mavlink message
- * @param   status  pointer to mavlink status
- * @returns         boolean for message receive (1 if successful, 0 if not)
- */
-bool MavlinkReceiveUDP(mavlink_message_t* msg, mavlink_status_t* status) {
-  while (SerialMAV.available())
-  {
-    uint8_t c = SerialMAV.read();
-    if (mavlink_parse_char(MAVLINK_COMM_0, c, msg, status))
-    {
-      /* ... */
-      return true;
-    }
-  }
-
-  return false;
-}
+const uint8_t sensorMsgFreqHz = 10; 
 
 /* send mavlink stuff to GS if received from FC */
 void TaskUARTFun(void * pvParameters) {
@@ -82,9 +41,10 @@ void TaskUARTFun(void * pvParameters) {
   mavlink_status_t status;
   uint8_t c;
   uint16_t len;
+  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+
   for(;;)
   {
-    uint8_t buf[MAVLINK_MAX_PACKET_LEN];
     udp.beginPacket(gshost, remoteport);
     while (SerialMAV.available())
     {
@@ -93,51 +53,21 @@ void TaskUARTFun(void * pvParameters) {
       {
         switch (msg.msgid)
         {
-          case MAVLINK_MSG_ID_MISSION_REQUEST_INT:
-          {
-            len = mavlink_msg_to_send_buffer(buf, &msg);
-            Serial.println("also getting mission request int for some reason");
-          } break;
-          case MAVLINK_MSG_ID_MISSION_REQUEST: /* this is deprecated -- need to transform into MISSION_REQUEST_INT */
-          {
-            udp.flush();
-            mavlink_mission_request_t req;  /* old, stinky format */
-            mavlink_msg_mission_request_decode(&msg, &req);
-            // mavlink_msg_mission_request_int_pack(fcSysID, MAV_COMP_ID_ALL, &msg, req.target_system, MAV_COMP_ID_ALL, req.seq, req.mission_type); /* new, epic format for cool ppl */
-            len = mavlink_msg_to_send_buffer(buf, &msg);
-
-            Serial.println("mission request on uart");
-            Serial.print("- targsys: "); Serial.println(req.target_system);
-            Serial.print("- seq: "); Serial.println(req.seq);
-            Serial.print("- type: "); Serial.println(req.mission_type);
-
-            /* resume udp and suspend here */
-            // vTaskResume(TaskUDP);
-            // vTaskSuspend(NULL);
-          } break;
+          /* add cases here for special cases / debugging (as below) */
           case MAVLINK_MSG_ID_MISSION_ACK:
           {
-            len = mavlink_msg_to_send_buffer(buf, &msg);
-
-            /* start streaming data again */
-            mavlink_message_t reqDataMsg;
-            uint8_t reqDataBuf[MAVLINK_MAX_PACKET_LEN];
-            mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &reqDataMsg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, 5, 1);
-            uint16_t reqDataLen = mavlink_msg_to_send_buffer(reqDataBuf, &reqDataMsg);
-            SerialMAV.write(reqDataBuf, reqDataLen);
-
-            Serial.println("mission ack sent (omg?!) ");
-
-            /* resume UDP task */
-            // vTaskResume(TaskUDP);
-            // receivedCount = false;
-          } break;
+            /* resume status messages when mission upload is complete */
+            mavlink_message_t startmsg;
+            mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &startmsg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, sensorMsgFreqHz, 1);
+            uint16_t startlen = mavlink_msg_to_send_buffer(buf, &startmsg);
+            SerialMAV.write(buf, startlen);
+          } 
           default:
           {
             len = mavlink_msg_to_send_buffer(buf, &msg);
-          } break;
+            udp.write(buf, len);
+          }
         }
-        udp.write(buf, len);
       }
     }
     udp.endPacket();
@@ -150,75 +80,34 @@ void TaskUDPFun(void * pvParameters) {
   Serial.print("Started udp activity on core "); Serial.println(xPortGetCoreID());
   mavlink_message_t msg;
   mavlink_status_t status;
+  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+  uint8_t c;
   for(;;)
   {
     int packetSize = udp.parsePacket();
     if (packetSize) 
     {
-      uint8_t buf[MAVLINK_MAX_PACKET_LEN];
       while (udp.available())
       {
-        uint8_t c = udp.read();
+        c = udp.read();
         if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status))
         {
-          udp.flush();
           switch (msg.msgid) 
           {
+            /* add cases here for special cases / debugging (as below) */
             case MAVLINK_MSG_ID_MISSION_COUNT:
             {
-              if (receivedCount == true) break;
-              uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-              SerialMAV.write(buf, len);
-              mavlink_mission_count_t count;
-              mavlink_msg_mission_count_decode(&msg, &count);
-
-              /* stop with the data flood while trying to do the mission bs */
-              mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &msg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, 5, 0);
-              len = mavlink_msg_to_send_buffer(buf, &msg);
-              SerialMAV.write(buf, len);
-
-              Serial.println("mission count on udp: ");
-              Serial.print("- type: "); Serial.println(count.mission_type);
-              Serial.print("- count: "); Serial.println(count.count);
-
-              /* suspend & disallow coming here again */
-              // udp.flush();
-              // vTaskSuspend(NULL);
-              // receivedCount = true;
-            } break;
-            case MAVLINK_MSG_ID_MISSION_ITEM_INT:
-            {
-              uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-              SerialMAV.write(buf, len);
-              mavlink_mission_item_int_t item;
-              mavlink_msg_mission_item_int_decode(&msg, &item);
-
-              Serial.println("received mission item (int) on udp");
-              Serial.print("- seq no: "); Serial.println(item.seq);
-
-              /* resume UART and suspend */
-              // vTaskResume(TaskUART);
-              // vTaskSuspend(NULL);
-            } break;
-            case MAVLINK_MSG_ID_MISSION_ITEM:
-            {
-              uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-              SerialMAV.write(buf, len);
-              mavlink_mission_item_t item;
-              mavlink_msg_mission_item_decode(&msg, &item);
-
-              Serial.println("received mission item on udp");
-              Serial.print("- seq no: "); Serial.println(item.seq);
-
-              /* resume UART and suspend */
-              // vTaskResume(TaskUART);
-              // vTaskSuspend(NULL);
-            } break;
+              /* stop all the status updates!! (so that the exchange happens better) */
+              mavlink_message_t stopmsg;
+              mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &stopmsg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, sensorMsgFreqHz, 0);
+              uint16_t stoplen = mavlink_msg_to_send_buffer(buf, &stopmsg);
+              SerialMAV.write(buf, stoplen);
+            } /* no break cuz we still wanna write the original message to the FC */
             default:
             {
               uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
               SerialMAV.write(buf, len);
-            } break;
+            }
           }
 
           break; /* get OUT of dis loop if u done reading */
@@ -243,18 +132,24 @@ void setup() {
   /* send req for data only after first message (heartbeat usually) is received */
   mavlink_message_t msg;
   mavlink_status_t status;
+  bool firstReceived = false;
   while (firstReceived == false)
   {
     Serial.print("waiting for heartbeat from FC...\r");
-    if (MavlinkReceiveUART(&msg, &status))
+    while (SerialMAV.available())
     {
-      fcSysID = msg.sysid;
-      Serial.print("got fc heartbeat: sysID "); Serial.println(fcSysID);
-      uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-      mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &msg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, 5, 1);
-      uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-      SerialMAV.write(buf, len);
-      firstReceived = true; 
+      uint8_t c = SerialMAV.read();
+      if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status))
+      {
+        fcSysID = msg.sysid;
+        Serial.print("got fc heartbeat: sysID "); Serial.println(fcSysID);
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+        mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &msg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, 5, 1);
+        uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+        SerialMAV.write(buf, len);
+        firstReceived = true; 
+        break;
+      }
     }
   }
   
