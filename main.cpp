@@ -32,7 +32,7 @@ uint8_t fcSysID = 1;
 WiFiClient client;
 uint8_t missionCount = 0;
 bool receivedCount = false;
-const uint16_t sensorMsgFreqHz = 10; 
+const uint16_t sensorMsgFreqHz = 5; 
 
 /* send mavlink stuff to GS if received from FC */
 void TaskUARTFun(void * pvParameters) {
