@@ -2,6 +2,7 @@
 #include <WiFi.h>
 #include <WiFiUdp.h>
 #include <ardupilotmega/mavlink.h>
+#include <Adafruit_NeoPixel.h>
 
 /* taskz handlez */
 TaskHandle_t TaskUART;
@@ -33,6 +34,7 @@ WiFiClient client;
 uint8_t missionCount = 0;
 bool receivedCount = false;
 const uint16_t sensorMsgFreqHz = 5; 
+Adafruit_NeoPixel pixels(3, 25, NEO_GRB + NEO_KHZ800);
 
 /* send mavlink stuff to GS if received from FC */
 void TaskUARTFun(void * pvParameters) {
@@ -128,6 +130,12 @@ void TaskUDPFun(void * pvParameters) {
 }
 
 void setup() {
+  /* pixel stuff */
+  pixels.begin();
+  pixels.clear();
+  pixels.setPixelColor(2, 255, 255, 255);
+  pixels.setBrightness(200);
+  pixels.show();
 
   /* debug serial */
   Serial.begin(9600);
