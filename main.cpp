@@ -19,6 +19,7 @@ IPAddress localhost;
 
 /* host connection information */
 WiFiUDP udp;
+WiFiClient client;
 const uint16_t remoteport = 14550;
 IPAddress gshost(10, 1, 5, 123); ///TODO: try to dynamically look for host IP ???
 
@@ -31,7 +32,6 @@ bool firstReceived = false;
 
 /* other globals */
 uint8_t fcSysID = 1;
-WiFiClient client;
 uint8_t missionCount = 0;
 bool receivedCount = false;
 const uint16_t sensorMsgFreqHz = 5; 
@@ -39,6 +39,7 @@ Adafruit_NeoPixel pixels(3, 25, NEO_GRB + NEO_KHZ800);
 int subocts = 0;
 int hostocts = 0;
 
+/* cool function for incrementing IP addresses */
 void incrementIPAddress(IPAddress &ip, IPAddress subnet, int fullSubOcts)
 {
   int i = 3;  /* start at lowest octet */
@@ -78,17 +79,7 @@ void TaskUARTFun(void * pvParameters)
 
   for(;;)
   {
-    /* increment gshost ip within subnet */
-    if (!udp.beginPacket(gshost, remoteport)) 
-    { 
-      incrementIPAddress(gshost, subnet, subocts);
-      Serial.print("begin packet failed, trying IP "); Serial.println(gshost);
-      vTaskDelay(10);
-      continue; /* try task again with new IP */ 
-    }
-
-    Serial.print("i guess it worked den: "); Serial.println(gshost);
-
+    udp.beginPacket(gshost, remoteport);
     while (SerialMAV.available())
     {
       c = SerialMAV.read();
@@ -223,17 +214,14 @@ void setup()
   }
   subnet = WiFi.subnetMask();
   gateway = WiFi.gatewayIP();
-  gshost = IPAddress(gateway[0], gateway[1], gateway[2], gateway[3] + 1);
-  for (int i = 0; i < 4; i++) { subocts += (subnet[i] == 0xFF) ? 1 : 0; } 
 
   Serial.print("\n wifi connected! \n");
   Serial.print("subnet: "); Serial.println(subnet);
   Serial.print("gateway: "); Serial.println(gateway);
-  Serial.print("subocts: "); Serial.println(subocts);
-  Serial.print("test: "); Serial.println(~subnet[3]);
-  
+  Serial.print("target GS IP: "); Serial.println(gshost);
+
   #ifdef STATIC_IP
-    /* configure wifi connection with a static ip */
+    /* configure a static IP for the drone */
     if (!WiFi.config(local_IP, gateway, subnet)) {
       Serial.println("STA failed to configure");
     }
