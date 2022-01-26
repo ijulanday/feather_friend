@@ -3,17 +3,20 @@
 #include <WiFiUdp.h>
 #include <ardupilotmega/mavlink.h>
 #include <Adafruit_NeoPixel.h>
+#include <SoftwareSerial.h>
 
 // #define   STATIC_IP   
+#define   RX  25
+#define   TX  24
 
 /* taskz handlez */
 TaskHandle_t TaskUART;
 TaskHandle_t TaskUDP;
 
 /* global network info definitions */
-const char* ssid = "Hydro_Corp";
-const char* password =  "warpedo1";
-IPAddress gateway; 
+const char* ssid = "tidepool";
+const char* password =  "gone fishing";
+IPAddress gateway(10, 1, 0, 1); 
 IPAddress subnet;
 IPAddress localhost;
 
@@ -21,11 +24,11 @@ IPAddress localhost;
 WiFiUDP udp;
 WiFiClient client;
 const uint16_t remoteport = 14550;
-IPAddress gshost(10, 1, 5, 123); ///TODO: try to dynamically look for host IP ???
+IPAddress gshost(10, 1, 0, 69); ///TODO: try to dynamically look for host IP ???
 
 
 /* definition of mavlink serial port (Serial1 on ESP32 feather) */
-HardwareSerial SerialMAV = Serial1;
+SoftwareSerial SerialMAV(25, 24);
 
 /* used in main loop to track first message received */
 bool firstReceived = false;
@@ -165,14 +168,14 @@ void TaskUDPFun(void * pvParameters)
 void setup() 
 {
   /* pixel stuff */
-  pixels.begin();
-  pixels.clear();
-  pixels.setPixelColor(2, 255, 255, 255);
-  pixels.setBrightness(200);
-  pixels.show();
+  // pixels.begin();
+  // pixels.clear();
+  // pixels.setPixelColor(2, 255, 255, 255);
+  // pixels.setBrightness(200);
+  // pixels.show();
 
   /* debug serial */
-  Serial.begin(9600);
+  Serial.begin(115200);
   while (!Serial) {}
 
   /* mavlink serial */
@@ -186,7 +189,7 @@ void setup()
   bool firstReceived = false;
   while (firstReceived == false)
   {
-    Serial.print("waiting for heartbeat from FC...\r");
+    Serial.print("waiting for heartbeat from FC...\n");
     while (SerialMAV.available())
     {
       uint8_t c = SerialMAV.read();
