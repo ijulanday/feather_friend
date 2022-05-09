@@ -6,8 +6,8 @@
 #include <SoftwareSerial.h>
 
 // #define   STATIC_IP   
-#define   RX  25
-#define   TX  24
+// #define   RX  16
+// #define   TX  17
 
 /* taskz handlez */
 TaskHandle_t TaskUART;
@@ -28,7 +28,8 @@ IPAddress gshost(10, 1, 0, 69); ///TODO: try to dynamically look for host IP ???
 
 
 /* definition of mavlink serial port (Serial1 on ESP32 feather) */
-SoftwareSerial SerialMAV(25, 24);
+// SoftwareSerial SerialMAV(RX, TX);
+HardwareSerial SerialMAV = Serial1;
 
 /* used in main loop to track first message received */
 bool firstReceived = false;
@@ -177,6 +178,7 @@ void setup()
   /* debug serial */
   Serial.begin(9600);
   while (!Serial) {}
+  delay(1000);
 
   /* mavlink serial */
   SerialMAV.begin(115200);
