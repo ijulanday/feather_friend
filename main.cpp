@@ -1,74 +1,98 @@
-#include <Arduino.h>
-#include <WiFi.h>
-#include <WiFiUdp.h>
-#include <ardupilotmega/mavlink.h>
-#include <Adafruit_NeoPixel.h>
-#include <SoftwareSerial.h>
-
-// #define   STATIC_IP   
-// #define   RX  16
-// #define   TX  17
-
-/* taskz handlez */
-TaskHandle_t TaskUART;
-TaskHandle_t TaskUDP;
-
-/* global network info definitions */
-const char* ssid = "tidepool";
-const char* password =  "gone fishing";
-IPAddress gateway(10, 1, 0, 1); 
-IPAddress subnet;
-IPAddress localhost;
-
-/* host connection information */
-WiFiUDP udp;
-WiFiClient client;
-const uint16_t remoteport = 14550;
-IPAddress gshost(10, 1, 0, 69); ///TODO: try to dynamically look for host IP ???
+#include "main.h"
 
 
-/* definition of mavlink serial port (Serial1 on ESP32 feather) */
-// SoftwareSerial SerialMAV(RX, TX);
-HardwareSerial SerialMAV = Serial1;
-
-/* used in main loop to track first message received */
-bool firstReceived = false;
-
-/* other globals */
-uint8_t fcSysID = 1;
-uint8_t missionCount = 0;
-bool receivedCount = false;
-const uint16_t sensorMsgFreqHz = 5; 
-Adafruit_NeoPixel pixels(3, 25, NEO_GRB + NEO_KHZ800);
-int subocts = 0;
-int hostocts = 0;
-
-/* cool function for incrementing IP addresses */
-void incrementIPAddress(IPAddress &ip, IPAddress subnet, int fullSubOcts)
+void setup() 
 {
-  int i = 3;  /* start at lowest octet */
-  Serial.print("testing ip: "); Serial.println(ip);
-  while (i >= fullSubOcts) /* octet index should never go below zero */
-  {
-    Serial.print("i = "); Serial.println(i);
-    uint8_t invnet = ~subnet[i];
-    if ((ip[i] + 1) > invnet) /* if octet value exceeds subnet... */
-    {
-      Serial.print("octet "); Serial.print(i); Serial.print(" exceeded subnet max of "); Serial.println(invnet);
-      ip[i] = 0;  /* reset value */
-      i--; /* move to increment next higher octet */
-      continue;
-    } 
+  /* pixel stuff */
+  // pixels.begin();
+  // pixels.clear();
+  // pixels.setPixelColor(2, 255, 255, 255);
+  // pixels.setBrightness(200);
+  // pixels.show();
 
-    else 
+  /* debug serial */
+  Serial.begin(9600);
+  while (!Serial) {}
+  delay(1000);
+
+  /* mavlink serial */
+  SerialMAV.begin(115200);
+  while (!SerialMAV) {}
+  firstReceived = false;
+
+  /* send req for data only after first message (heartbeat usually) is received */
+  mavlink_message_t msg;
+  mavlink_status_t status;
+  bool firstReceived = false;
+  while (firstReceived == false)
+  {
+    Serial.print("waiting for heartbeat from FC...\n");
+    while (SerialMAV.available())
     {
-      ip[i]++;  /* increment octet value */
-      Serial.print("new ip: "); Serial.println(ip);
-      return; 
+      uint8_t c = SerialMAV.read();
+      if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status))
+      {
+        fcSysID = msg.sysid;
+        Serial.print("\n got fc heartbeat: sysID "); Serial.println(fcSysID);
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+        mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &msg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, sensorMsgFreqHz, 1);
+        uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
+        SerialMAV.write(buf, len);
+        firstReceived = true; 
+        break;
+      }
     }
   }
+  
+  /* connect to wifi network provided ssid and password */
+  WiFi.begin(ssid, password);
+  Serial.print("Connecting to wifi");
+  while (WiFi.status() != WL_CONNECTED) 
+  {
+    delay(500);
+    Serial.print(".");
+  }
+  subnet = WiFi.subnetMask();
+  gateway = WiFi.gatewayIP();
 
-  return;
+  Serial.print("\n wifi connected! \n");
+  Serial.print("subnet: "); Serial.println(subnet);
+  Serial.print("gateway: "); Serial.println(gateway);
+  Serial.print("target GS IP: "); Serial.println(gshost);
+
+  #ifdef STATIC_IP
+    /* configure a static IP for the drone */
+    if (!WiFi.config(local_IP, gateway, subnet)) {
+      Serial.println("STA failed to configure");
+    }
+  #endif
+
+  //create a task that will be executed in the Task1code() function, with priority 1 and executed on core 0
+  xTaskCreatePinnedToCore(
+                    TaskUARTFun,   /* Task function. */
+                    "TaskUART",     /* name of task. */
+                    10000,       /* Stack size of task */
+                    NULL,        /* parameter of the task */
+                    1,           /* priority of the task */
+                    &TaskUART,      /* Task handle to keep track of created task */
+                    0);          /* pin task to core 0 */                  
+  delay(250); 
+
+  //create a task that will be executed in the Task2code() function, with priority 1 and executed on core 1
+  xTaskCreatePinnedToCore(
+                    TaskUDPFun,   /* Task function. */
+                    "TaskUDP",     /* name of task. */
+                    10000,       /* Stack size of task */
+                    NULL,        /* parameter of the task */
+                    1,           /* priority of the task */
+                    &TaskUDP,      /* Task handle to keep track of created task */
+                    1);          /* pin task to core 1 */
+  delay(250); 
+}
+
+void loop() 
+{
+  vTaskDelete(NULL);
 }
 
 /* send mavlink stuff to GS if received from FC */
@@ -166,96 +190,30 @@ void TaskUDPFun(void * pvParameters)
   }
 }
 
-void setup() 
+/* cool function for incrementing IP addresses */
+void incrementIPAddress(IPAddress &ip, IPAddress subnet, int fullSubOcts)
 {
-  /* pixel stuff */
-  // pixels.begin();
-  // pixels.clear();
-  // pixels.setPixelColor(2, 255, 255, 255);
-  // pixels.setBrightness(200);
-  // pixels.show();
-
-  /* debug serial */
-  Serial.begin(9600);
-  while (!Serial) {}
-  delay(1000);
-
-  /* mavlink serial */
-  SerialMAV.begin(115200);
-  while (!SerialMAV) {}
-  firstReceived = false;
-
-  /* send req for data only after first message (heartbeat usually) is received */
-  mavlink_message_t msg;
-  mavlink_status_t status;
-  bool firstReceived = false;
-  while (firstReceived == false)
+  int i = 3;  /* start at lowest octet */
+  Serial.print("testing ip: "); Serial.println(ip);
+  while (i >= fullSubOcts) /* octet index should never go below zero */
   {
-    Serial.print("waiting for heartbeat from FC...\n");
-    while (SerialMAV.available())
+    Serial.print("i = "); Serial.println(i);
+    uint8_t invnet = ~subnet[i];
+    if ((ip[i] + 1) > invnet) /* if octet value exceeds subnet... */
     {
-      uint8_t c = SerialMAV.read();
-      if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status))
-      {
-        fcSysID = msg.sysid;
-        Serial.print("\n got fc heartbeat: sysID "); Serial.println(fcSysID);
-        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
-        mavlink_msg_request_data_stream_pack(255, MAV_COMP_ID_ALL, &msg, fcSysID, MAV_COMP_ID_ALL, MAV_DATA_STREAM_ALL, sensorMsgFreqHz, 1);
-        uint16_t len = mavlink_msg_to_send_buffer(buf, &msg);
-        SerialMAV.write(buf, len);
-        firstReceived = true; 
-        break;
-      }
+      Serial.print("octet "); Serial.print(i); Serial.print(" exceeded subnet max of "); Serial.println(invnet);
+      ip[i] = 0;  /* reset value */
+      i--; /* move to increment next higher octet */
+      continue;
+    } 
+
+    else 
+    {
+      ip[i]++;  /* increment octet value */
+      Serial.print("new ip: "); Serial.println(ip);
+      return; 
     }
   }
-  
-  /* connect to wifi network provided ssid and password */
-  WiFi.begin(ssid, password);
-  Serial.print("Connecting to wifi");
-  while (WiFi.status() != WL_CONNECTED) 
-  {
-    delay(500);
-    Serial.print(".");
-  }
-  subnet = WiFi.subnetMask();
-  gateway = WiFi.gatewayIP();
 
-  Serial.print("\n wifi connected! \n");
-  Serial.print("subnet: "); Serial.println(subnet);
-  Serial.print("gateway: "); Serial.println(gateway);
-  Serial.print("target GS IP: "); Serial.println(gshost);
-
-  #ifdef STATIC_IP
-    /* configure a static IP for the drone */
-    if (!WiFi.config(local_IP, gateway, subnet)) {
-      Serial.println("STA failed to configure");
-    }
-  #endif
-
-  //create a task that will be executed in the Task1code() function, with priority 1 and executed on core 0
-  xTaskCreatePinnedToCore(
-                    TaskUARTFun,   /* Task function. */
-                    "TaskUART",     /* name of task. */
-                    10000,       /* Stack size of task */
-                    NULL,        /* parameter of the task */
-                    1,           /* priority of the task */
-                    &TaskUART,      /* Task handle to keep track of created task */
-                    0);          /* pin task to core 0 */                  
-  delay(250); 
-
-  //create a task that will be executed in the Task2code() function, with priority 1 and executed on core 1
-  xTaskCreatePinnedToCore(
-                    TaskUDPFun,   /* Task function. */
-                    "TaskUDP",     /* name of task. */
-                    10000,       /* Stack size of task */
-                    NULL,        /* parameter of the task */
-                    1,           /* priority of the task */
-                    &TaskUDP,      /* Task handle to keep track of created task */
-                    1);          /* pin task to core 1 */
-  delay(250); 
-}
-
-void loop() 
-{
-  vTaskDelete(NULL);
+  return;
 }
