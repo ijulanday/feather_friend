@@ -102,7 +102,6 @@ void TaskUARTFun(void * pvParameters)
   mavlink_status_t status;
   uint8_t c;
   uint16_t len;
-  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
 
   for(;;)
   {
@@ -112,6 +111,8 @@ void TaskUARTFun(void * pvParameters)
       c = SerialMAV.read();
       if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status))
       {
+        uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+
         switch (msg.msgid)
         {
           /* add cases here for special cases / debugging (as below) */
@@ -128,10 +129,12 @@ void TaskUARTFun(void * pvParameters)
         
         len = mavlink_msg_to_send_buffer(buf, &msg);
         udp.write(buf, len);
+        
         break;
       }
     }
     udp.endPacket();
+    
     vTaskDelay(1);
   }
 }
@@ -142,7 +145,6 @@ void TaskUDPFun(void * pvParameters)
   Serial.print("Started udp activity on core "); Serial.println(xPortGetCoreID());
   mavlink_message_t msg;
   mavlink_status_t status;
-  uint8_t buf[MAVLINK_MAX_PACKET_LEN];
   uint8_t c;
   for(;;)
   {
@@ -154,6 +156,8 @@ void TaskUDPFun(void * pvParameters)
         c = udp.read();
         if (mavlink_parse_char(MAVLINK_COMM_1, c, &msg, &status))
         {
+          uint8_t buf[MAVLINK_MAX_PACKET_LEN];
+
           switch (msg.msgid) 
           {
             /* add cases here for special cases / debugging (as below) */
