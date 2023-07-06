@@ -152,7 +152,7 @@ void TaskUDPFun(void * pvParameters)
       while (udp.available())
       {
         c = udp.read();
-        if (mavlink_parse_char(MAVLINK_COMM_0, c, &msg, &status))
+        if (mavlink_parse_char(MAVLINK_COMM_1, c, &msg, &status))
         {
           switch (msg.msgid) 
           {
