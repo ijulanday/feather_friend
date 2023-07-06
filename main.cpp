@@ -83,7 +83,7 @@ void setup()
                     "TaskUDP",     /* name of task. */
                     100000,       /* Stack size of task */
                     NULL,        /* parameter of the task */
-                    2,           /* priority of the task */
+                    1,           /* priority of the task */
                     &TaskUDP,      /* Task handle to keep track of created task */
                     1);          /* pin task to core 1 */
   delay(250); 
