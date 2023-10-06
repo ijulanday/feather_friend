@@ -42,6 +42,10 @@ const uint16_t sensorMsgFreqHz = 5;
 Adafruit_NeoPixel pixels(3, 25, NEO_GRB + NEO_KHZ800);
 int subocts = 0;
 int hostocts = 0;
+mavlink_message_t msg;
+mavlink_status_t status;
+uint8_t c;
+uint16_t len;
 
 void incrementIPAddress(IPAddress &ip, IPAddress subnet, int fullSubOcts);
 void TaskUDPFun(void * pvParameters);
